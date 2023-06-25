@@ -141,9 +141,11 @@ void startM4Detections() {
     message.data.objectDetection.shouldStart = true;
     bool success = msg::createMessage(message, &startMsg);
     printf("[M7] Start success=%d\r\n", success);
+    printf("[M7] message=%d\r\n", startMsg.message.data[0]);
+    CHECK(ipc->M4IsAlive(500u));
     if (success) {
         printf("[M7] Sent message\r\n");
-        ipc->SendMessage(startMsg);
+        IpcM7::GetSingleton()->SendMessage(startMsg);
     }
 
     lastMillis = TimerMillis();
