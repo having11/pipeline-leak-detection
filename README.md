@@ -1,51 +1,18 @@
-# Coral Dev Board Micro source code (coralmicro)
+# Coral Dev Board Micro Pipeline Leak Detection
 
-This repository contains all the code required to build apps for the [Coral Dev
-Board Micro](https://coral.ai/products/dev-board-micro). The Dev Board Micro is
-based on the NXP RT1176 microcontroller (dual-core MCU with Cortex M7 and M4)
-and includes an on-board camera (324x324 px), a microphone, and a Coral Edge TPU
-to accelerate TensorFlow Lite models.
+## Get the project locally
 
-The software platform for Dev Board Micro is called `coralmicro` and is based
-on [FreeRTOS](https://www.freertos.org/). It also includes libraries for
-compatibility with the Arduino programming language.
-
-The `coralmicro` build system is based on CMake and includes support for Make
-and Ninja builds. After you build the included projects, you can flash
-them to your board with the included flashtool (`scripts/flashtool.py`).
-
-![main](https://github.com/google-coral/coralmicro/actions/workflows/ci.yml/badge.svg?event=push)
-![arduino](https://github.com/google-coral/coralmicro/actions/workflows/arduino.yml/badge.svg?event=push)
-
-
-## Documentation
-
-+ [Get Started with the Dev Board Micro](https://coral.ai/docs/dev-board-micro/get-started/)
-
-+ [Get Started with Arduino](https://coral.ai/docs/dev-board-micro/arduino/)
-
-+ [Build an out-of-tree project](https://github.com/google-coral/coralmicro-out-of-tree-sample/blob/main/README.md)
-
-+ [coralmicro API reference](http://coral.ai/docs/reference/micro/)
-
-+ [coralmicro examples](/examples/)
-
-
-
-## Get the code
-
-1. Clone `coralmicro` and all submodules:
+1. Clone `pipeline-leak-detection` and all submodules:
 
     ```bash
-    git clone --recurse-submodules -j8 https://github.com/google-coral/coralmicro
+    git clone --recurse-submodules -j8 https://github.com/having11/pipeline-leak-detection
     ```
 
 2. Install the required tools:
 
     ```bash
-    cd coralmicro && bash setup.sh
+    cd pipeline-leak-detection && bash setup.sh
     ```
-
 
 ## Build the code
 
@@ -59,14 +26,9 @@ bash build.sh
 
 ## Flash the board
 
-This example blinks the board's green LED:
-
 ```bash
-python3 scripts/flashtool.py -e blink_led
+python3 scripts/flashtool.py --app pipeline_detection --wifi_ssid <YOUR_SSID> --wifi_psk <YOUR_PSK>
 ```
-
-You can see the code at [examples/blink_led/](examples/blink_led/).
-
 
 ### Reset the board to Serial Downloader
 
@@ -80,17 +42,3 @@ Then try flashing the board again.
 
 For more details, see the [troubleshooting info on
 coral.ai](https://coral.ai/docs/dev-board-micro/get-started/#serial-downloader).
-
-
-## Update the repo
-
-Use the following commands to keep all coralmicro submodules in sync (rebasing your current branch):
-
-```bash
-git fetch origin
-
-git rebase origin/main
-
-git submodule update --init --recursive
-```
-
