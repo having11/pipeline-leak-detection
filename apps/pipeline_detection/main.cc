@@ -129,7 +129,9 @@ void handleM4Message(const uint8_t data[kIpcMessageBufferDataSize]) {
 
 void startM4Detections() {
     if (isDetecting) {
+        printf("[M7] Detection already started; reset timer\r\n");
         lastMillis = TimerMillis();
+        return;
     }
 
     printf("[M7] Sound found; starting inferencing on M4\r\n");
@@ -139,6 +141,7 @@ void startM4Detections() {
     message.data.objectDetection.shouldStart = true;
     bool success = msg::createMessage(message, &startMsg);
     if (success) {
+        printf("[M7] Sent message\r\n");
         ipc->SendMessage(startMsg);
     }
 
