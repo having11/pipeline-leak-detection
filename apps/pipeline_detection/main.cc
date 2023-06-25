@@ -36,9 +36,6 @@ STATIC_TENSOR_ARENA_IN_SDRAM(tensor_arena, M7Constant::kTensorArenaSize);
 static AudioDriverBuffers<M7Constant::kNumDmaBuffers, M7Constant::kDmaBufferSize> audio_buffers;
 static AudioDriver audio_driver(audio_buffers);
 static std::array<int16_t, tensorflow::kYamnetAudioSize> audio_input;
-static std::unique_ptr<tflite::MicroInterpreter> interpreter;
-static std::unique_ptr<FrontendState> frontend_state;
-static std::unique_ptr<LatestSamples> audio_latest;
 
 constexpr char kIndexFileName[] = "/coral_micro_camera.html";
 constexpr char kCameraStreamUrlPrefix[] = "/camera_stream";
@@ -160,19 +157,25 @@ void Main() {
         vTaskSuspend(nullptr);
     }
 
+    auto edgetpu_context = EdgeTpuManager::GetSingleton()->OpenDevice();
+    if (!edgetpu_context) {
+        printf("Failed to get TPU context\r\n");
+        vTaskSuspend(nullptr);
+    }
+
     tflite::MicroErrorReporter error_reporter;
     auto yamnet_resolver = tensorflow::SetupYamNetResolver<M7Constant::kUseTpu>();
 
-    interpreter = std::make_unique<tflite::MicroInterpreter>(model, yamnet_resolver, tensor_arena,
-                                        M7Constant::kTensorArenaSize, &error_reporter);
-    frontend_state = std::make_unique<FrontendState>();
-    if (interpreter->AllocateTensors() != kTfLiteOk) {
+    tflite::MicroInterpreter interpreter{model, yamnet_resolver, tensor_arena,
+                                       M7Constant::kTensorArenaSize, &error_reporter};
+    if (interpreter.AllocateTensors() != kTfLiteOk) {
         printf("AllocateTensors failed.\r\n");
         vTaskSuspend(nullptr);
     }
 
+    FrontendState frontend_state{};
     if (!coralmicro::tensorflow::PrepareAudioFrontEnd(
-            frontend_state.get(), coralmicro::tensorflow::AudioModel::kYAMNet)) {
+            &frontend_state, coralmicro::tensorflow::AudioModel::kYAMNet)) {
         printf("coralmicro::tensorflow::PrepareAudioFrontEnd() failed.\r\n");
         vTaskSuspend(nullptr);
     }
@@ -182,10 +185,10 @@ void Main() {
                                     M7Constant::kDmaBufferSizeMs};
     AudioService audio_service(&audio_driver, audio_config, M7Constant::kAudioServicePriority,
                                 M7Constant::kDropFirstSamplesMs);
-    audio_latest = std::make_unique<LatestSamples>(
-        MsToSamples(AudioSampleRate::k16000_Hz, tensorflow::kYamnetDurationMs));
+    LatestSamples audio_latest(
+      MsToSamples(AudioSampleRate::k16000_Hz, tensorflow::kYamnetDurationMs));
     audio_service.AddCallback(
-        audio_latest.get(),
+        &audio_latest,
         +[](void* ctx, const int32_t* samples, size_t num_samples) {
             static_cast<LatestSamples*>(ctx)->Append(samples, num_samples);
             return true;
@@ -194,7 +197,7 @@ void Main() {
     vTaskDelay(pdMS_TO_TICKS(tensorflow::kYamnetDurationMs));
 
     while (true) {
-        audio_latest->AccessLatestSamples(
+        audio_latest.AccessLatestSamples(
             [](const std::vector<int32_t>& samples, size_t start_index) {
             size_t i, j = 0;
             // Starting with start_index, grab until the end of the buffer.
@@ -207,7 +210,9 @@ void Main() {
                 audio_input[i + j] = samples[j] >> 16;
             }
             });
-        run(interpreter.get(), frontend_state.get());
+        run(&interpreter, &frontend_state);
+        // Delay 975 ms to rate limit the TPU version.
+        vTaskDelay(pdMS_TO_TICKS(tensorflow::kYamnetDurationMs));
     }
 }
 }  // namespace
