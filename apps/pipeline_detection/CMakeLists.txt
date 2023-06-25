@@ -12,9 +12,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-add_subdirectory(elf_loader)
-add_subdirectory(mfg_test)
-add_subdirectory(multicore_model_cascade)
-add_subdirectory(rack_test)
-add_subdirectory(usb_drive)
-add_subdirectory(pipeline_detection)
+set(PIPELINE_DETECTION_LINK_LIBRARIES
+    libs_base-m7_freertos
+    libs_base-m7_http_server
+    libs_jpeg_m7
+)
+
+add_executable_m7(pipeline_detection
+    main.cc
+    DATA
+    ${CMAKE_CURRENT_SOURCE_DIR}/web/coral_micro_camera.html>/coral_micro_camera.html
+)
+
+target_link_libraries(pipeline_detection
+    ${PIPELINE_DETECTION_LINK_LIBRARIES}
+    libs_nxp_rt1176-sdk_wiced
+    libs_base-m7_wifi
+)
