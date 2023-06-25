@@ -1,14 +1,13 @@
 #ifndef M7_CONSTANTS_H
 #define M7_CONSTANTS_H
 
+#include <unordered_set>
+
 #include "libs/camera/camera.h"
 #include "libs/tensorflow/audio_models.h"
 
 namespace M7Constant {
     using namespace coralmicro;
-
-    constexpr char kCameraStreamUrlPrefix[] = "/camera_stream";
-    constexpr char kIndexFileName[] = "/coral_micro_camera.html";
 
     constexpr CameraMode kMode = CameraMode::kStreaming;
     constexpr CameraFormat kFormat = CameraFormat::kRgb;
@@ -17,6 +16,8 @@ namespace M7Constant {
     constexpr size_t kWidth = CameraTask::kWidth;
     constexpr size_t kHeight = CameraTask::kHeight;
     constexpr int kJpegQuality = 75;
+    constexpr bool kPreserveRatio = false;
+    constexpr bool kWhiteBalance = true;
     constexpr int kMaxCameraWaitMs = 400;
 
     constexpr int kTensorArenaSize = 1 * 1024 * 1024;
@@ -36,6 +37,14 @@ namespace M7Constant {
 
     constexpr char kModelName[] = "/yamnet_spectra_in_edgetpu.tflite";
     constexpr bool kUseTpu = true;
+
+    constexpr char kIndexFileName[] = "/coral_micro_camera.html";
+    constexpr char kCameraStreamUrlPrefix[] = "/camera_stream";
+
+    const std::unordered_set<uint16_t> kDesiredSoundClasses(
+        { 438, 439, 440, 441, 442, 443, 444, 445, 447, 483, }
+    );
+    constexpr uint32_t kM4InferencingTimeMs = 10000;
 }
 
 #endif

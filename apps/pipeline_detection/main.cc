@@ -1,26 +1,30 @@
 #include <cstdio>
 #include <vector>
 
+#include "libs/audio/audio_service.h"
+#include "libs/base/filesystem.h"
 #include "libs/base/http_server.h"
+#include "libs/rpc/rpc_http_server.h"
+#include "libs/base/ipc_m7.h"
 #include "libs/base/led.h"
 #include "libs/base/strings.h"
+#include "libs/base/timer.h"
+#include "libs/base/mutex.h"
 #include "libs/base/utils.h"
+#include "libs/base/wifi.h"
 #include "libs/camera/camera.h"
 #include "libs/libjpeg/jpeg.h"
-#include "libs/base/filesystem.h"
-#include "libs/base/timer.h"
-#include "libs/base/ipc_m7.h"
 #include "libs/tensorflow/audio_models.h"
 #include "libs/tensorflow/utils.h"
 #include "libs/tpu/edgetpu_manager.h"
 #include "libs/tpu/edgetpu_op.h"
-#include "libs/audio/audio_service.h"
 #include "third_party/freertos_kernel/include/FreeRTOS.h"
 #include "third_party/freertos_kernel/include/task.h"
 #include "third_party/tflite-micro/tensorflow/lite/experimental/microfrontend/lib/frontend.h"
 #include "third_party/tflite-micro/tensorflow/lite/micro/micro_interpreter.h"
 #include "third_party/tflite-micro/tensorflow/lite/micro/micro_mutable_op_resolver.h"
-#include "libs/base/wifi.h"
+#include "third_party/freertos_kernel/include/semphr.h"
+#include "third_party/mjson/src/mjson.h"
 
 #include "ipc_message.h"
 #include "m7_constants.h"
@@ -29,65 +33,138 @@ namespace coralmicro {
 namespace {
 
 static IpcM7 *ipc;
-SemaphoreHandle_t xCameraSema;
-StaticSemaphore_t xCameraSemaBuffer;
+static volatile bool isDetecting = false;
+static uint64_t lastMillis;
+SemaphoreHandle_t mutex_;
 
 STATIC_TENSOR_ARENA_IN_SDRAM(tensor_arena, M7Constant::kTensorArenaSize);
 static AudioDriverBuffers<M7Constant::kNumDmaBuffers, M7Constant::kDmaBufferSize> audio_buffers;
 static AudioDriver audio_driver(audio_buffers);
 static std::array<int16_t, tensorflow::kYamnetAudioSize> audio_input;
 
-constexpr char kIndexFileName[] = "/coral_micro_camera.html";
-constexpr char kCameraStreamUrlPrefix[] = "/camera_stream";
-
 HttpServer::Content uriHandler(const char* uri) {
-    if (StrEndsWith(uri, "index.html") ||
-        StrEndsWith(uri, "coral_micro_camera.html")) {
-        return std::string(kIndexFileName);
-    } else if (StrEndsWith(uri, kCameraStreamUrlPrefix)) {
-        // [start-snippet:jpeg]
-        std::vector<uint8_t> buf(CameraTask::kWidth * CameraTask::kHeight *
-                                CameraFormatBpp(CameraFormat::kRgb));
+    if (StrEndsWith(uri, "index.html"))
+        return std::string(M7Constant::kIndexFileName);
+    else if (StrEndsWith(uri, "is_detecting")) {
+        return isDetecting ? std::string("true") : std::string("false");
+    } else if (StrEndsWith(uri, M7Constant::kCameraStreamUrlPrefix)) {
+        std::vector<uint8_t> buf(M7Constant::kWidth * M7Constant::kHeight *
+                                CameraFormatBpp(M7Constant::kFormat));
         auto fmt = CameraFrameFormat{
-            CameraFormat::kRgb,       CameraFilterMethod::kBilinear,
-            CameraRotation::k0,       CameraTask::kWidth,
-            CameraTask::kHeight,
-            /*preserve_ratio=*/false, buf.data(),
-            /*while_balance=*/true};
+            M7Constant::kFormat,       M7Constant::kFilter,
+            M7Constant::kRotation,     M7Constant::kWidth,
+            M7Constant::kHeight,
+            M7Constant::kPreserveRatio, buf.data(),
+            M7Constant::kWhiteBalance};
+        coralmicro::MulticoreMutexLock lock(0);
         if (!CameraTask::GetSingleton()->GetFrame({fmt})) {
-        printf("Unable to get frame from camera\r\n");
-        return {};
+            printf("[M7] Unable to get frame from camera\r\n");
+            return {};
         }
 
         std::vector<uint8_t> jpeg;
-        JpegCompressRgb(buf.data(), fmt.width, fmt.height, /*quality=*/75, &jpeg);
-        // [end-snippet:jpeg]
+        JpegCompressRgb(buf.data(), fmt.width, fmt.height, M7Constant::kJpegQuality, &jpeg);
         return jpeg;
     }
     return {};
 }
 
-void handleM4Message(const uint8_t data[kIpcMessageBufferDataSize]) {
-    const auto* msg = reinterpret_cast<const msg::Message*>(data);
+void getDetections(struct jsonrpc_request* r) {
+    printf("[M7] getDetections called\r\n");
+    auto* detections = msg::getDetectedObjects();
+    std::vector<uint8_t> json;
+    json.reserve(2048);
+    json.clear();
+    StrAppend(&json, "[");
 
-    printf("[M7] Received message type=%d\r\n", (uint8_t)msg->type);
-
-    if (msg->type == msg::MessageType::kKeywordSpotted) {
-        printf("[M7] KWS value=%d\r\n", msg->data.audioFound.found);
-
-        // Check if sound has been detected by M4
-
-        // Start inferencing on images
+    for (uint8_t i = 0; i < detections->count; i++) {
+        auto detection = detections->objects[i];
+        StrAppend(&json, "{\n");
+        StrAppend(&json, "\"score\": %g,\n", detection.confidence);
+        StrAppend(&json, "\"class\": %d,\n", detection.objectClass);
+        StrAppend(&json, "\"bounding_box\": {\n");
+        StrAppend(&json, "\"top_left\": [%g, %g],\n", detection.bbox.topLeft[0], detection.bbox.topLeft[1]);
+        StrAppend(&json, "\"bottom_right\": [%g, %g],\n", detection.bbox.bottomRight[0], detection.bbox.bottomRight[1]);
+        StrAppend(&json, "\"width\": %g,\n", detection.bbox.width);
+        StrAppend(&json, "\"height\": %g,\n", detection.bbox.height);
+        StrAppend(&json, i != detections->count - 1 ? "},\n" : "}\n");
     }
 
-    else if (msg->type == msg::MessageType::kAck) {
-        printf("[M7] M4 ACK message\r\n");
+    StrAppend(&json, "]");
+    // Add null-terminator just in case
+    json.push_back('\0');
+    
+    jsonrpc_return_success(r, "{%Q: %s}", "detections", json.data());
+}
+
+void getIsDetecting(struct jsonrpc_request* r) {
+    printf("[M7] getIsDetecting called\r\n");
+    jsonrpc_return_success(r, "{%Q: %B}", "is_detecting", isDetecting);
+}
+
+void handleM4Message(const uint8_t data[kIpcMessageBufferDataSize]) {
+    using namespace msg;
+
+    const auto* msg = reinterpret_cast<const Message*>(data);
+    auto type = msg->type;
+
+    printf("[M7] Received message type=%d\r\n", (uint8_t)type);
+
+    switch (type) {
+        case MessageType::kAck: {
+            printf("[M7] Received ACK from M4\r\n");
+            break;
+        }
+
+        case MessageType::kDetectedObject: {
+            auto obj = msg->data.detectedObject;
+            printf("[M7] Detected object received; idx=%d, class=%d\r\n", obj.idx, obj.objectClass);
+        }
+
+        default: {
+            printf("[M7] Unhandled message type received: %d\r\n", (uint8_t)type);
+        }
+    }
+}
+
+void startM4Detections() {
+    if (isDetecting) {
+        lastMillis = TimerMillis();
+    }
+
+    printf("[M7] Sound found; starting inferencing on M4\r\n");
+    IpcMessage startMsg{};
+    msg::Message message;
+    message.type = msg::MessageType::kObjectDetection;
+    message.data.objectDetection.shouldStart = true;
+    bool success = msg::createMessage(message, &startMsg);
+    if (success) {
+        ipc->SendMessage(startMsg);
+    }
+
+    lastMillis = TimerMillis();
+    isDetecting = true;
+}
+
+void stopM4Detections() {
+    if (isDetecting) {
+        printf("[M7] Stopping M4 inferencing\r\n");
+        IpcMessage stopMsg{};
+        msg::Message message;
+        message.type = msg::MessageType::kObjectDetection;
+        message.data.objectDetection.shouldStop = true;
+        bool success = msg::createMessage(message, &stopMsg);
+        if (success) {
+            ipc->SendMessage(stopMsg);
+        }
+
+        isDetecting = false;
     }
 }
 
 // Run invoke and get the results after the interpreter have already been
 // populated with raw audio input.
-void run(tflite::MicroInterpreter* interpreter, FrontendState* frontend_state) {
+void runYamnet(tflite::MicroInterpreter* interpreter, FrontendState* frontend_state) {
     auto input_tensor = interpreter->input_tensor(0);
     auto preprocess_start = TimerMillis();
     tensorflow::YamNetPreprocessInput(audio_input.data(), input_tensor,
@@ -109,6 +186,13 @@ void run(tflite::MicroInterpreter* interpreter, FrontendState* frontend_state) {
     auto results =
         tensorflow::GetClassificationResults(interpreter, M7Constant::kThreshold, M7Constant::kTopK);
     printf("%s\r\n", tensorflow::FormatClassificationOutput(results).c_str());
+
+    for (auto& c : results) {
+        if (M7Constant::kDesiredSoundClasses.find(c.id) != M7Constant::kDesiredSoundClasses.end()) {
+            startM4Detections();
+            return;
+        }
+    }
 }
 
 void Main() {
@@ -116,8 +200,10 @@ void Main() {
     // Turn on Status LED to show the board is on.
     LedSet(Led::kStatus, true);
 
+    mutex_ = xSemaphoreCreateMutex();
+
     CameraTask::GetSingleton()->SetPower(true);
-    CameraTask::GetSingleton()->Enable(CameraMode::kStreaming);
+    CameraTask::GetSingleton()->Enable(M7Constant::kMode);
 
     // Init M4 core
     ipc = IpcM7::GetSingleton();
@@ -143,6 +229,11 @@ void Main() {
     HttpServer http_server;
     http_server.AddUriHandler(uriHandler);
     UseHttpServer(&http_server);
+
+    jsonrpc_init(nullptr, nullptr);
+    jsonrpc_export("detections", getDetections);
+    jsonrpc_export("is_detecting", getIsDetecting);
+    UseHttpServer(new JsonRpcHttpServer);
 
     std::vector<uint8_t> yamnet_tflite;
     if (!LfsReadFile(M7Constant::kModelName, &yamnet_tflite)) {
@@ -210,9 +301,13 @@ void Main() {
                 audio_input[i + j] = samples[j] >> 16;
             }
             });
-        run(&interpreter, &frontend_state);
+        runYamnet(&interpreter, &frontend_state);
         // Delay 975 ms to rate limit the TPU version.
         vTaskDelay(pdMS_TO_TICKS(tensorflow::kYamnetDurationMs));
+
+        if (TimerMillis() - lastMillis >= M7Constant::kM4InferencingTimeMs) {
+
+        }
     }
 }
 }  // namespace

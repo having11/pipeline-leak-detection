@@ -8,20 +8,37 @@ namespace msg {
 enum class MessageType : uint8_t {
     kAck,
     kKeywordSpotted,
-    kObjectDetectionDone,
+    kObjectDetection,
+    kDetectedObject,
 };
 
-struct MessageAudioFound {
+struct AudioFound {
     bool found;
 };
 
-struct MessageObjectDetectionDone {
-    bool done;
+struct ObjectDetection {
+    bool shouldStart;
+    bool shouldStop;
+};
+
+struct BoundingBox {
+    float topLeft[2];
+    float bottomRight[2];
+    float width;
+    float height;
+};
+
+struct DetectedObject {
+    uint8_t idx;
+    uint16_t objectClass;
+    float confidence;
+    BoundingBox bbox;
 };
 
 union MessageData {
-    MessageAudioFound audioFound;
-    MessageObjectDetectionDone detectionDone;
+    AudioFound audioFound;
+    ObjectDetection objectDetection;
+    DetectedObject detectedObject;
 };
 
 struct Message {
@@ -32,6 +49,33 @@ struct Message {
 static_assert(sizeof(Message) <=
               coralmicro::kIpcMessageBufferDataSize);
 
+static bool createMessage(Message msg, coralmicro::IpcMessage* ipcMsg) {
+    ipcMsg->type = coralmicro::IpcMessageType::kApp;
+    auto* appMsg = reinterpret_cast<msg::Message*>(&(ipcMsg->message.data));
+    appMsg->type = msg.type;
+
+    // Don't overrun the buffer
+    if (sizeof(msg.data) <= sizeof(ipcMsg->message.data)) {
+        return false;
+    }
+
+    appMsg->data = msg.data;
+
+    return true;
+}
+
+constexpr uint8_t kMaxDetectedObjects = 10;
+
+struct DetectedObjects {
+    uint8_t count;
+    DetectedObject objects[kMaxDetectedObjects];
+};
+
+static DetectedObjects* getDetectedObjects() {
+    static DetectedObjects detectedObjects;
+
+    return &detectedObjects;
+}
 }
 
 #endif

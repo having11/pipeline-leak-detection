@@ -2,6 +2,8 @@ set(PIPELINE_DETECTION_LINK_LIBRARIES
     libs_base-m7_freertos
     libs_base-m7_http_server
     libs_jpeg_m7
+    libs_mjson
+    libs_rpc_http_server
 )
 
 add_executable_m7(pipeline_detection
@@ -25,4 +27,5 @@ add_executable_m4(pipeline_detection_m4
 
 target_link_libraries(pipeline_detection_m4
     libs_base-m4_freertos
+    libs_tensorflow-m4
 )
