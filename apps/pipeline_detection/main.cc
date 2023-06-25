@@ -56,7 +56,6 @@ HttpServer::Content uriHandler(const char* uri) {
             M7Constant::kHeight,
             M7Constant::kPreserveRatio, buf.data(),
             M7Constant::kWhiteBalance};
-        coralmicro::MulticoreMutexLock lock(0);
         if (!CameraTask::GetSingleton()->GetFrame({fmt})) {
             printf("[M7] Unable to get frame from camera\r\n");
             return {};
@@ -136,13 +135,19 @@ void startM4Detections() {
 
     printf("[M7] Sound found; starting inferencing on M4\r\n");
     IpcMessage startMsg{};
-    msg::Message message;
-    message.type = msg::MessageType::kObjectDetection;
-    message.data.objectDetection.shouldStart = true;
-    bool success = msg::createMessage(message, &startMsg);
-    printf("[M7] Start success=%d\r\n", success);
+    startMsg.type = IpcMessageType::kApp;
+    auto* app_msg = reinterpret_cast<msg::Message*>(&startMsg.message.data);
+    app_msg->type = msg::MessageType::kObjectDetection;
+    app_msg->data.objectDetection.shouldStart = 1;
+    app_msg->data.objectDetection.shouldStop = 0;
+    // msg::Message message;
+    // message.type = msg::MessageType::kObjectDetection;
+    // message.data.objectDetection.shouldStart = true;
+    // bool success = msg::createMessage(message, &startMsg);
+    // printf("[M7] Start success=%d\r\n", success);
+    bool success = true;
     printf("[M7] message=%d\r\n", startMsg.message.data[0]);
-    CHECK(ipc->M4IsAlive(500u));
+    printf("[M7] alive=%d\r\n", ipc->M4IsAlive(500u));
     if (success) {
         printf("[M7] Sent message\r\n");
         IpcM7::GetSingleton()->SendMessage(startMsg);
@@ -156,12 +161,22 @@ void stopM4Detections() {
     if (isDetecting) {
         printf("[M7] Stopping M4 inferencing\r\n");
         IpcMessage stopMsg{};
-        msg::Message message;
-        message.type = msg::MessageType::kObjectDetection;
-        message.data.objectDetection.shouldStop = true;
-        bool success = msg::createMessage(message, &stopMsg);
+        stopMsg.type = IpcMessageType::kApp;
+        auto* app_msg = reinterpret_cast<msg::Message*>(&stopMsg.message.data);
+        app_msg->type = msg::MessageType::kObjectDetection;
+        app_msg->data.objectDetection.shouldStart = 0;
+        app_msg->data.objectDetection.shouldStop = 1;
+        // msg::Message message;
+        // message.type = msg::MessageType::kObjectDetection;
+        // message.data.objectDetection.shouldStart = true;
+        // bool success = msg::createMessage(message, &startMsg);
+        // printf("[M7] Start success=%d\r\n", success);
+        bool success = true;
+        printf("[M7] message=%d\r\n", stopMsg.message.data[0]);
+        printf("[M7] alive=%d\r\n", ipc->M4IsAlive(500u));
         if (success) {
-            ipc->SendMessage(stopMsg);
+            printf("[M7] Sent message\r\n");
+            IpcM7::GetSingleton()->SendMessage(stopMsg);
         }
 
         isDetecting = false;
@@ -236,10 +251,10 @@ void Main() {
     http_server.AddUriHandler(uriHandler);
     UseHttpServer(&http_server);
 
-    jsonrpc_init(nullptr, nullptr);
-    jsonrpc_export("detections", getDetections);
-    jsonrpc_export("is_detecting", getIsDetecting);
-    UseHttpServer(new JsonRpcHttpServer);
+    // jsonrpc_init(nullptr, nullptr);
+    // jsonrpc_export("detections", getDetections);
+    // jsonrpc_export("is_detecting", getIsDetecting);
+    // UseHttpServer(new JsonRpcHttpServer);
 
     std::vector<uint8_t> yamnet_tflite;
     if (!LfsReadFile(M7Constant::kModelName, &yamnet_tflite)) {
@@ -292,6 +307,8 @@ void Main() {
         });
     // Delay for the first buffers to fill.
     vTaskDelay(pdMS_TO_TICKS(tensorflow::kYamnetDurationMs));
+
+    LedSet(Led::kTpu, false);
 
     while (true) {
         audio_latest.AccessLatestSamples(

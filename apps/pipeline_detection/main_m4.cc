@@ -17,12 +17,16 @@
 using namespace coralmicro;
 
 static IpcM4* ipc;
-static TaskHandle_t *inferenceHandle;
+static TaskHandle_t inferenceHandle;
 
 [[noreturn]] void inference_task(void* param) {
     // TODO: convert to interpreter pointer for invocation
+    bool on = false;
 
     while (true) {
+        LedSet(Led::kStatus, on);
+        on = !on;
+        vTaskDelay(pdMS_TO_TICKS(500));
         // Get image
 
         // Invoke
@@ -33,11 +37,9 @@ static TaskHandle_t *inferenceHandle;
 }
 
 void stopInferenceTask() {
-    printf("[M4] Deleting inferencing task\r\n");
-    if (inferenceHandle) {
-        vTaskDelete(*inferenceHandle);
-        inferenceHandle = nullptr;
-    }
+    printf("[M4] Suspending inferencing task\r\n");
+    
+    vTaskSuspend(inferenceHandle);
 }
 
 void handleM7Message(const uint8_t data[kIpcMessageBufferDataSize]) {
@@ -56,12 +58,12 @@ void handleM7Message(const uint8_t data[kIpcMessageBufferDataSize]) {
             if (contents.shouldStart && !contents.shouldStop) {
                 printf("[M4] Start requested\r\n");
                 // Create new task and start it
-                stopInferenceTask();
-                xTaskCreate(&inference_task, "inference_user_task", configMINIMAL_STACK_SIZE * 30,
-                    nullptr, kAppTaskPriority, inferenceHandle);
+                vTaskResume(inferenceHandle);
+                
+                printf("[M4] Task started\r\n");
             }
 
-            if (contents.shouldStop && !contents.shouldStart) {
+            else if (contents.shouldStop && !contents.shouldStart) {
                 printf("[M4] Stop requested\r\n");
                 // Delete detection task
                 stopInferenceTask();
@@ -75,10 +77,10 @@ void handleM7Message(const uint8_t data[kIpcMessageBufferDataSize]) {
     }
 
     IpcMessage ackMsg{};
-    bool success = msg::createMessage({ .type = msg::MessageType::kAck }, &ackMsg);
-    if (success) {
-        ipc->SendMessage(ackMsg);
-    }
+    ackMsg.type = IpcMessageType::kApp;
+    auto* app_msg = reinterpret_cast<msg::Message*>(&ackMsg.message.data);
+    app_msg->type = msg::MessageType::kAck;
+    IpcM4::GetSingleton()->SendMessage(ackMsg);
 }
 
 extern "C" [[noreturn]] void app_main(void *param) {
@@ -88,7 +90,9 @@ extern "C" [[noreturn]] void app_main(void *param) {
     ipc = IpcM4::GetSingleton();
     ipc->RegisterAppMessageHandler(handleM7Message);
 
-    while (true) {
-        ;
-    }
+    xTaskCreate(&inference_task, "inference_user_task", configMINIMAL_STACK_SIZE * 30,
+                    nullptr, kAppTaskPriority, &inferenceHandle);
+    vTaskSuspend(inferenceHandle);
+
+    vTaskSuspend(nullptr);
 }
