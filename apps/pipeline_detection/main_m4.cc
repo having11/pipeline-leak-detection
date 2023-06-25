@@ -88,8 +88,6 @@ extern "C" [[noreturn]] void app_main(void *param) {
     ipc = IpcM4::GetSingleton();
     ipc->RegisterAppMessageHandler(handleM7Message);
 
-    vTaskSuspend(nullptr);
-
     while (true) {
         ;
     }

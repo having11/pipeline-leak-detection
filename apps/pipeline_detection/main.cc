@@ -140,6 +140,7 @@ void startM4Detections() {
     message.type = msg::MessageType::kObjectDetection;
     message.data.objectDetection.shouldStart = true;
     bool success = msg::createMessage(message, &startMsg);
+    printf("[M7] Start success=%d\r\n", success);
     if (success) {
         printf("[M7] Sent message\r\n");
         ipc->SendMessage(startMsg);
@@ -305,11 +306,11 @@ void Main() {
             }
             });
         runYamnet(&interpreter, &frontend_state);
-        // Delay 975 ms to rate limit the TPU version.
+        // Delay 500 ms to rate limit the TPU version.
         vTaskDelay(pdMS_TO_TICKS(tensorflow::kYamnetDurationMs));
 
         if (TimerMillis() - lastMillis >= M7Constant::kM4InferencingTimeMs) {
-
+            stopM4Detections();
         }
     }
 }
