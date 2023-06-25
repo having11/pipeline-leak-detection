@@ -7,6 +7,8 @@
 #include "libs/base/utils.h"
 #include "libs/camera/camera.h"
 #include "libs/libjpeg/jpeg.h"
+#include "libs/base/filesystem.h"
+#include "libs/base/timer.h"
 #include "libs/base/ipc_m7.h"
 #include "libs/tensorflow/audio_models.h"
 #include "libs/tensorflow/utils.h"
@@ -86,6 +88,32 @@ void handleM4Message(const uint8_t data[kIpcMessageBufferDataSize]) {
     }
 }
 
+// Run invoke and get the results after the interpreter have already been
+// populated with raw audio input.
+void run(tflite::MicroInterpreter* interpreter, FrontendState* frontend_state) {
+    auto input_tensor = interpreter->input_tensor(0);
+    auto preprocess_start = TimerMillis();
+    tensorflow::YamNetPreprocessInput(audio_input.data(), input_tensor,
+                                        frontend_state);
+    // Reset frontend state.
+    FrontendReset(frontend_state);
+    auto preprocess_end = TimerMillis();
+    if (interpreter->Invoke() != kTfLiteOk) {
+        printf("Failed to invoke on test input\r\n");
+        vTaskSuspend(nullptr);
+    }
+    auto current_time = TimerMillis();
+    printf(
+        "Yamnet preprocess time: %lums, invoke time: %lums, total: "
+        "%lums\r\n",
+        static_cast<uint32_t>(preprocess_end - preprocess_start),
+        static_cast<uint32_t>(current_time - preprocess_end),
+        static_cast<uint32_t>(current_time - preprocess_start));
+    auto results =
+        tensorflow::GetClassificationResults(interpreter, M7Constant::kThreshold, M7Constant::kTopK);
+    printf("%s\r\n", tensorflow::FormatClassificationOutput(results).c_str());
+}
+
 void Main() {
     printf("Camera HTTP Example!\r\n");
     // Turn on Status LED to show the board is on.
@@ -119,7 +147,68 @@ void Main() {
     http_server.AddUriHandler(uriHandler);
     UseHttpServer(&http_server);
 
-    vTaskSuspend(nullptr);
+    std::vector<uint8_t> yamnet_tflite;
+    if (!LfsReadFile(M7Constant::kModelName, &yamnet_tflite)) {
+        printf("Failed to load model\r\n");
+        vTaskSuspend(nullptr);
+    }
+
+    const auto* model = tflite::GetModel(yamnet_tflite.data());
+    if (model->version() != TFLITE_SCHEMA_VERSION) {
+        printf("Model schema version is %lu, supported is %d", model->version(),
+            TFLITE_SCHEMA_VERSION);
+        vTaskSuspend(nullptr);
+    }
+
+    tflite::MicroErrorReporter error_reporter;
+    auto yamnet_resolver = tensorflow::SetupYamNetResolver<M7Constant::kUseTpu>();
+
+    interpreter = std::make_unique<tflite::MicroInterpreter>(model, yamnet_resolver, tensor_arena,
+                                        M7Constant::kTensorArenaSize, &error_reporter);
+    frontend_state = std::make_unique<FrontendState>();
+    if (interpreter->AllocateTensors() != kTfLiteOk) {
+        printf("AllocateTensors failed.\r\n");
+        vTaskSuspend(nullptr);
+    }
+
+    if (!coralmicro::tensorflow::PrepareAudioFrontEnd(
+            frontend_state.get(), coralmicro::tensorflow::AudioModel::kYAMNet)) {
+        printf("coralmicro::tensorflow::PrepareAudioFrontEnd() failed.\r\n");
+        vTaskSuspend(nullptr);
+    }
+
+    // Setup audio
+    AudioDriverConfig audio_config{AudioSampleRate::k16000_Hz, M7Constant::kNumDmaBuffers,
+                                    M7Constant::kDmaBufferSizeMs};
+    AudioService audio_service(&audio_driver, audio_config, M7Constant::kAudioServicePriority,
+                                M7Constant::kDropFirstSamplesMs);
+    audio_latest = std::make_unique<LatestSamples>(
+        MsToSamples(AudioSampleRate::k16000_Hz, tensorflow::kYamnetDurationMs));
+    audio_service.AddCallback(
+        audio_latest.get(),
+        +[](void* ctx, const int32_t* samples, size_t num_samples) {
+            static_cast<LatestSamples*>(ctx)->Append(samples, num_samples);
+            return true;
+        });
+    // Delay for the first buffers to fill.
+    vTaskDelay(pdMS_TO_TICKS(tensorflow::kYamnetDurationMs));
+
+    while (true) {
+        audio_latest->AccessLatestSamples(
+            [](const std::vector<int32_t>& samples, size_t start_index) {
+            size_t i, j = 0;
+            // Starting with start_index, grab until the end of the buffer.
+            for (i = 0; i < samples.size() - start_index; ++i) {
+                audio_input[i] = samples[i + start_index] >> 16;
+            }
+            // Now fill the rest of the data with the beginning of the
+            // buffer.
+            for (j = 0; j < samples.size() - i; ++j) {
+                audio_input[i + j] = samples[j] >> 16;
+            }
+            });
+        run(interpreter.get(), frontend_state.get());
+    }
 }
 }  // namespace
 }  // namespace coralmicro

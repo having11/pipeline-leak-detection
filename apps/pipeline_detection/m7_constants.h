@@ -34,8 +34,8 @@ namespace M7Constant {
     constexpr float kThreshold = 0.3;
     constexpr int kTopK = 5;
 
-    constexpr char kModelName[] = "/yamnet_spectra_in.tflite";
-    constexpr bool kUseTpu = false;
+    constexpr char kModelName[] = "/yamnet_spectra_in_edgetpu.tflite";
+    constexpr bool kUseTpu = true;
 }
 
 #endif
