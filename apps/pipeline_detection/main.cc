@@ -217,7 +217,7 @@ void runYamnet(tflite::MicroInterpreter* interpreter, FrontendState* frontend_st
 }
 
 void Main() {
-    printf("Camera HTTP Example!\r\n");
+    printf("Started!\r\n");
     // Turn on Status LED to show the board is on.
     LedSet(Led::kStatus, true);
 
@@ -325,7 +325,7 @@ void Main() {
             }
             });
         runYamnet(&interpreter, &frontend_state);
-        // Delay 500 ms to rate limit the TPU version.
+        // Delay 975 ms to rate limit the TPU version.
         vTaskDelay(pdMS_TO_TICKS(tensorflow::kYamnetDurationMs));
 
         if (TimerMillis() - lastMillis >= M7Constant::kM4InferencingTimeMs) {

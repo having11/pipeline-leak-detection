@@ -18,12 +18,21 @@ using namespace coralmicro;
 
 static IpcM4* ipc;
 static TaskHandle_t inferenceHandle;
+static volatile bool shouldStop = false;
 
 [[noreturn]] void inference_task(void* param) {
     // TODO: convert to interpreter pointer for invocation
     bool on = false;
 
     while (true) {
+        if (shouldStop) {
+            printf("[M4] Suspending inferencing task\r\n");
+            LedSet(Led::kStatus, false);
+            on = false;
+            shouldStop = false;
+            vTaskSuspend(nullptr);
+        }
+
         LedSet(Led::kStatus, on);
         on = !on;
         vTaskDelay(pdMS_TO_TICKS(500));
@@ -37,9 +46,9 @@ static TaskHandle_t inferenceHandle;
 }
 
 void stopInferenceTask() {
-    printf("[M4] Suspending inferencing task\r\n");
+    printf("[M4] Set inferencing task stop flag\r\n");
     
-    vTaskSuspend(inferenceHandle);
+    shouldStop = true;
 }
 
 void handleM7Message(const uint8_t data[kIpcMessageBufferDataSize]) {
@@ -59,13 +68,11 @@ void handleM7Message(const uint8_t data[kIpcMessageBufferDataSize]) {
                 printf("[M4] Start requested\r\n");
                 // Create new task and start it
                 vTaskResume(inferenceHandle);
-                
                 printf("[M4] Task started\r\n");
             }
 
             else if (contents.shouldStop && !contents.shouldStart) {
                 printf("[M4] Stop requested\r\n");
-                // Delete detection task
                 stopInferenceTask();
             }
             break;
