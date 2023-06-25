@@ -94,11 +94,11 @@ void Main() {
     CameraTask::GetSingleton()->SetPower(true);
     CameraTask::GetSingleton()->Enable(CameraMode::kStreaming);
 
-    // Init M4 core
-    ipc = IpcM7::GetSingleton();
-    ipc->RegisterAppMessageHandler(handleM4Message);
-    ipc->StartM4();
-    CHECK(ipc->M4IsAlive(500u));
+    // // Init M4 core
+    // ipc = IpcM7::GetSingleton();
+    // ipc->RegisterAppMessageHandler(handleM4Message);
+    // ipc->StartM4();
+    // CHECK(ipc->M4IsAlive(500u));
 
     if (!WiFiTurnOn(/*default_iface=*/false)) {
         printf("Unable to bring up WiFi...\r\n");
