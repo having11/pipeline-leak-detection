@@ -55,7 +55,7 @@ static bool createMessage(Message msg, coralmicro::IpcMessage* ipcMsg) {
     appMsg->type = msg.type;
 
     // Don't overrun the buffer
-    if (sizeof(msg.data) <= sizeof(ipcMsg->message.data)) {
+    if (sizeof(msg.data) >= sizeof(ipcMsg->message.data)) {
         return false;
     }
 
