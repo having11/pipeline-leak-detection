@@ -42,12 +42,15 @@ static AudioDriverBuffers<M7Constant::kNumDmaBuffers, M7Constant::kDmaBufferSize
 static AudioDriver audio_driver(audio_buffers);
 static std::array<int16_t, tensorflow::kYamnetAudioSize> audio_input;
 
+std::vector<uint8_t> getDetections(void);
+
 HttpServer::Content uriHandler(const char* uri) {
     if (StrEndsWith(uri, "index.html"))
         return std::string(M7Constant::kIndexFileName);
-    else if (StrEndsWith(uri, "is_detecting")) {
-        return isDetecting ? std::string("true") : std::string("false");
-    } else if (StrEndsWith(uri, M7Constant::kCameraStreamUrlPrefix)) {
+    else if (StrEndsWith(uri, "is_detecting"))
+        return isDetecting ? std::string("{\"is_detecting\": true}")
+            : std::string("{\"is_detecting\": false}");
+    else if (StrEndsWith(uri, M7Constant::kCameraStreamUrlPrefix)) {
         std::vector<uint8_t> buf(M7Constant::kWidth * M7Constant::kHeight *
                                 CameraFormatBpp(M7Constant::kFormat));
         auto fmt = CameraFrameFormat{
@@ -65,16 +68,19 @@ HttpServer::Content uriHandler(const char* uri) {
         JpegCompressRgb(buf.data(), fmt.width, fmt.height, M7Constant::kJpegQuality, &jpeg);
         return jpeg;
     }
+    else if (StrEndsWith(uri, "detections")) {
+        return getDetections();
+    }
     return {};
 }
 
-void getDetections(struct jsonrpc_request* r) {
+std::vector<uint8_t> getDetections() {
     printf("[M7] getDetections called\r\n");
     auto* detections = msg::getDetectedObjects();
     std::vector<uint8_t> json;
     json.reserve(2048);
     json.clear();
-    StrAppend(&json, "[");
+    StrAppend(&json, "{\"detections\": [");
 
     for (uint8_t i = 0; i < detections->count; i++) {
         auto detection = detections->objects[i];
@@ -85,20 +91,15 @@ void getDetections(struct jsonrpc_request* r) {
         StrAppend(&json, "\"top_left\": [%g, %g],\n", detection.bbox.topLeft[0], detection.bbox.topLeft[1]);
         StrAppend(&json, "\"bottom_right\": [%g, %g],\n", detection.bbox.bottomRight[0], detection.bbox.bottomRight[1]);
         StrAppend(&json, "\"width\": %g,\n", detection.bbox.width);
-        StrAppend(&json, "\"height\": %g,\n", detection.bbox.height);
+        StrAppend(&json, "\"height\": %g\n", detection.bbox.height);
         StrAppend(&json, i != detections->count - 1 ? "},\n" : "}\n");
     }
 
-    StrAppend(&json, "]");
+    StrAppend(&json, "]}");
     // Add null-terminator just in case
     json.push_back('\0');
-    
-    jsonrpc_return_success(r, "{%Q: %s}", "detections", json.data());
-}
 
-void getIsDetecting(struct jsonrpc_request* r) {
-    printf("[M7] getIsDetecting called\r\n");
-    jsonrpc_return_success(r, "{%Q: %B}", "is_detecting", isDetecting);
+    return json;
 }
 
 void handleM4Message(const uint8_t data[kIpcMessageBufferDataSize]) {
@@ -140,11 +141,6 @@ void startM4Detections() {
     app_msg->type = msg::MessageType::kObjectDetection;
     app_msg->data.objectDetection.shouldStart = 1;
     app_msg->data.objectDetection.shouldStop = 0;
-    // msg::Message message;
-    // message.type = msg::MessageType::kObjectDetection;
-    // message.data.objectDetection.shouldStart = true;
-    // bool success = msg::createMessage(message, &startMsg);
-    // printf("[M7] Start success=%d\r\n", success);
     bool success = true;
     printf("[M7] message=%d\r\n", startMsg.message.data[0]);
     printf("[M7] alive=%d\r\n", ipc->M4IsAlive(500u));
@@ -166,11 +162,6 @@ void stopM4Detections() {
         app_msg->type = msg::MessageType::kObjectDetection;
         app_msg->data.objectDetection.shouldStart = 0;
         app_msg->data.objectDetection.shouldStop = 1;
-        // msg::Message message;
-        // message.type = msg::MessageType::kObjectDetection;
-        // message.data.objectDetection.shouldStart = true;
-        // bool success = msg::createMessage(message, &startMsg);
-        // printf("[M7] Start success=%d\r\n", success);
         bool success = true;
         printf("[M7] message=%d\r\n", stopMsg.message.data[0]);
         printf("[M7] alive=%d\r\n", ipc->M4IsAlive(500u));
@@ -250,11 +241,6 @@ void Main() {
     HttpServer http_server;
     http_server.AddUriHandler(uriHandler);
     UseHttpServer(&http_server);
-
-    // jsonrpc_init(nullptr, nullptr);
-    // jsonrpc_export("detections", getDetections);
-    // jsonrpc_export("is_detecting", getIsDetecting);
-    // UseHttpServer(new JsonRpcHttpServer);
 
     std::vector<uint8_t> yamnet_tflite;
     if (!LfsReadFile(M7Constant::kModelName, &yamnet_tflite)) {
