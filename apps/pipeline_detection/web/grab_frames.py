@@ -20,6 +20,9 @@ URL = f'http://{args.ip_address}/camera_stream'
 DEST_FOLDER = f'captures'
 DELAY_SECONDS = 1 / args.fps
 
+if args.prefix != '':
+    args.prefix += '_'
+
 homepath = path.expanduser('~')
 full_path = args.output if args.output is not None else path.join(homepath, DEST_FOLDER)
 print(f'Using path={full_path} to store captures')
