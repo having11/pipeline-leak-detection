@@ -20,7 +20,7 @@ namespace M7Constant {
     constexpr bool kWhiteBalance = true;
     constexpr int kMaxCameraWaitMs = 400;
 
-    constexpr int kTensorArenaSize = 1 * 1024 * 1024;
+    constexpr int kTensorArenaSize = 1 * 975 * 1024;
     constexpr int kNumDmaBuffers = 2;
     constexpr int kDmaBufferSizeMs = 50;
     constexpr int kDmaBufferSize =
@@ -38,7 +38,6 @@ namespace M7Constant {
     constexpr char kModelName[] = "/yamnet_spectra_in_edgetpu.tflite";
     constexpr bool kUseTpu = true;
 
-    constexpr char kIndexFileName[] = "/coral_micro_camera.html";
     constexpr char kCameraStreamUrlPrefix[] = "/camera_stream";
 
     const std::unordered_set<uint16_t> kDesiredSoundClasses(

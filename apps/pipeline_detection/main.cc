@@ -38,19 +38,14 @@ static uint64_t lastMillis;
 SemaphoreHandle_t mutex_;
 
 STATIC_TENSOR_ARENA_IN_SDRAM(tensor_arena, M7Constant::kTensorArenaSize);
-static AudioDriverBuffers<M7Constant::kNumDmaBuffers, M7Constant::kDmaBufferSize> audio_buffers;
-static AudioDriver audio_driver(audio_buffers);
-static std::array<int16_t, tensorflow::kYamnetAudioSize> audio_input;
+AudioDriverBuffers<M7Constant::kNumDmaBuffers, M7Constant::kDmaBufferSize> audio_buffers;
+AudioDriver audio_driver(audio_buffers);
+std::array<int16_t, tensorflow::kYamnetAudioSize> audio_input;
 
-std::vector<uint8_t> getDetections(void);
+static std::vector<uint8_t> getDetections(void);
 
 HttpServer::Content uriHandler(const char* uri) {
-    if (StrEndsWith(uri, "index.html"))
-        return std::string(M7Constant::kIndexFileName);
-    else if (StrEndsWith(uri, "is_detecting"))
-        return isDetecting ? std::string("{\"is_detecting\": true}")
-            : std::string("{\"is_detecting\": false}");
-    else if (StrEndsWith(uri, M7Constant::kCameraStreamUrlPrefix)) {
+    if (StrEndsWith(uri, M7Constant::kCameraStreamUrlPrefix)) {
         std::vector<uint8_t> buf(M7Constant::kWidth * M7Constant::kHeight *
                                 CameraFormatBpp(M7Constant::kFormat));
         auto fmt = CameraFrameFormat{
@@ -69,37 +64,12 @@ HttpServer::Content uriHandler(const char* uri) {
         return jpeg;
     }
     else if (StrEndsWith(uri, "detections")) {
-        return getDetections();
+        auto* results = msg::getClassificationResult();
+
+        return results->result == 'd' ? std::string("{\"result\": \"defect\"}") :
+            std::string("{\"result\": \"good\"}");
     }
     return {};
-}
-
-std::vector<uint8_t> getDetections() {
-    printf("[M7] getDetections called\r\n");
-    auto* detections = msg::getDetectedObjects();
-    std::vector<uint8_t> json;
-    json.reserve(2048);
-    json.clear();
-    StrAppend(&json, "{\"detections\": [");
-
-    for (uint8_t i = 0; i < detections->count; i++) {
-        auto detection = detections->objects[i];
-        StrAppend(&json, "{\n");
-        StrAppend(&json, "\"score\": %g,\n", detection.confidence);
-        StrAppend(&json, "\"class\": %d,\n", detection.objectClass);
-        StrAppend(&json, "\"bounding_box\": {\n");
-        StrAppend(&json, "\"top_left\": [%g, %g],\n", detection.bbox.topLeft[0], detection.bbox.topLeft[1]);
-        StrAppend(&json, "\"bottom_right\": [%g, %g],\n", detection.bbox.bottomRight[0], detection.bbox.bottomRight[1]);
-        StrAppend(&json, "\"width\": %g,\n", detection.bbox.width);
-        StrAppend(&json, "\"height\": %g\n", detection.bbox.height);
-        StrAppend(&json, i != detections->count - 1 ? "},\n" : "}\n");
-    }
-
-    StrAppend(&json, "]}");
-    // Add null-terminator just in case
-    json.push_back('\0');
-
-    return json;
 }
 
 void handleM4Message(const uint8_t data[kIpcMessageBufferDataSize]) {
@@ -107,8 +77,6 @@ void handleM4Message(const uint8_t data[kIpcMessageBufferDataSize]) {
 
     const auto* msg = reinterpret_cast<const Message*>(data);
     auto type = msg->type;
-
-    printf("[M7] Received message type=%d\r\n", (uint8_t)type);
 
     switch (type) {
         case MessageType::kAck: {
@@ -217,6 +185,8 @@ void Main() {
     CameraTask::GetSingleton()->SetPower(true);
     CameraTask::GetSingleton()->Enable(M7Constant::kMode);
 
+    msg::getClassificationResult()->result = 'g';
+
     // Init M4 core
     ipc = IpcM7::GetSingleton();
     ipc->RegisterAppMessageHandler(handleM4Message);
@@ -238,7 +208,7 @@ void Main() {
         vTaskSuspend(nullptr);
     }
 
-    HttpServer http_server;
+    static HttpServer http_server;
     http_server.AddUriHandler(uriHandler);
     UseHttpServer(&http_server);
 
@@ -264,7 +234,7 @@ void Main() {
     tflite::MicroErrorReporter error_reporter;
     auto yamnet_resolver = tensorflow::SetupYamNetResolver<M7Constant::kUseTpu>();
 
-    tflite::MicroInterpreter interpreter{model, yamnet_resolver, tensor_arena,
+    static tflite::MicroInterpreter interpreter{model, yamnet_resolver, tensor_arena,
                                        M7Constant::kTensorArenaSize, &error_reporter};
     if (interpreter.AllocateTensors() != kTfLiteOk) {
         printf("AllocateTensors failed.\r\n");
@@ -279,11 +249,11 @@ void Main() {
     }
 
     // Setup audio
-    AudioDriverConfig audio_config{AudioSampleRate::k16000_Hz, M7Constant::kNumDmaBuffers,
+    static AudioDriverConfig audio_config{AudioSampleRate::k16000_Hz, M7Constant::kNumDmaBuffers,
                                     M7Constant::kDmaBufferSizeMs};
-    AudioService audio_service(&audio_driver, audio_config, M7Constant::kAudioServicePriority,
+    static AudioService audio_service(&audio_driver, audio_config, M7Constant::kAudioServicePriority,
                                 M7Constant::kDropFirstSamplesMs);
-    LatestSamples audio_latest(
+    static LatestSamples audio_latest(
       MsToSamples(AudioSampleRate::k16000_Hz, tensorflow::kYamnetDurationMs));
     audio_service.AddCallback(
         &audio_latest,

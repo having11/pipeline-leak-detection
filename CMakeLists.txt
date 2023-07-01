@@ -32,6 +32,8 @@ if (NOT DEFINED WIFI_SSID)
 endif()
 add_definitions(-DWIFI_SSID="${WIFI_SSID}")
 
+SET(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} -Os")
+
 # Leave as is for an open AP.
 # If a password is specified, we try to connect as WPA2.
 if (NOT DEFINED WIFI_PSK)

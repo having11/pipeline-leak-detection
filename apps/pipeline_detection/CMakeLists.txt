@@ -9,7 +9,6 @@ set(PIPELINE_DETECTION_LINK_LIBRARIES
 add_executable_m7(pipeline_detection
     main.cc
     DATA
-    ${CMAKE_CURRENT_SOURCE_DIR}/web/coral_micro_camera.html>/coral_micro_camera.html
     ${PROJECT_SOURCE_DIR}/models/yamnet_spectra_in_edgetpu.tflite>/yamnet_spectra_in_edgetpu.tflite
     M4_EXECUTABLE
     pipeline_detection_m4
@@ -23,6 +22,8 @@ target_link_libraries(pipeline_detection
 
 add_executable_m4(pipeline_detection_m4
     main_m4.cc
+    DATA
+    ${PROJECT_SOURCE_DIR}/models/pipeline_model_int8.tflite>/model
 )
 
 target_link_libraries(pipeline_detection_m4
