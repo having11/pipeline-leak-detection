@@ -10,10 +10,6 @@
 #include "ipc_message.h"
 #include "m4_constants.h"
 
-// TODO: Add messaging checks for start/stop of classification
-
-// TODO: Add method for getting images (don't forget the mutex!)
-
 using namespace coralmicro;
 
 static IpcM4* ipc;
@@ -21,7 +17,6 @@ static TaskHandle_t inferenceHandle;
 static volatile bool shouldStop = false;
 
 [[noreturn]] void inference_task(void* param) {
-    // TODO: convert to interpreter pointer for invocation
     bool on = false;
 
     while (true) {
@@ -36,12 +31,6 @@ static volatile bool shouldStop = false;
         LedSet(Led::kStatus, on);
         on = !on;
         vTaskDelay(pdMS_TO_TICKS(500));
-        // Get image
-
-        // Invoke
-
-        // Store results in array
-        auto* detections = msg::getDetectedObjects();
     }
 }
 
